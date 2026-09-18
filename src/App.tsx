@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, Route, Routes } from 'react-router-dom'
 import './App.css'
 import { supabase } from './lib/supabase'
+import type { ReactNode } from 'react'
 
 type ContentItem = {
   id: string
@@ -91,7 +92,17 @@ function ContentEditor({ item, saving, onSave, onClose }: { item: ContentItem; s
 }
 
 export default function App() {
-  const [content, setContent] = useState<ContentItem[]>(() => { const saved = localStorage.getItem('qdw-content'); return saved ? JSON.parse(saved) : initialContent })
+  const [content, setContent] = useState<ContentItem[]>(() => {
+    const saved = localStorage.getItem('qdw-content')
+    if (!saved) return initialContent
+    try {
+      const parsed: unknown = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed as ContentItem[] : initialContent
+    } catch {
+      localStorage.removeItem('qdw-content')
+      return initialContent
+    }
+  })
   useEffect(() => {
     if (!supabase) return
     supabase.from('content_items').select('id,type,title,description,image_path').eq('published', true).order('sort_order').then(({ data, error }) => {
@@ -103,5 +114,14 @@ export default function App() {
     setContent(items)
     localStorage.setItem('qdw-content', JSON.stringify(items))
   }
-  return <Routes><Route path="/admin" element={<AdminPage content={content} setContent={updateContent} />} /><Route path="*" element={<HomePage content={content} />} /></Routes>
+  return <ErrorBoundary><Routes><Route path="/admin" element={<AdminPage content={content} setContent={updateContent} />} /><Route path="*" element={<HomePage content={content} />} /></Routes></ErrorBoundary>
+}
+
+class ErrorBoundary extends React.Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) return <main className="error-page"><h1>No se pudo cargar el sitio</h1><p>Actualiza la página. Si el problema continúa, reinicia el servidor con <code>npm run dev</code>.</p><button className="button button-dark" onClick={() => window.location.reload()}>Recargar</button></main>
+    return this.props.children
+  }
 }
