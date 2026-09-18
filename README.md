@@ -11,6 +11,19 @@ npm run dev
 
 The `/admin` route is a content-management UI for programs, speakers, and workshops. It currently persists edits in browser `localStorage`, which makes the interface usable immediately while the Supabase project is configured.
 
+## Netlify deployment
+
+In Netlify, choose **Add new project → Import an existing project → GitHub**, select `SolSoria/qdw-2026-web`, and deploy. The included `netlify.toml` configures the Vite build automatically.
+
+Add these environment variables in **Project configuration → Environment variables**:
+
+```env
+VITE_SUPABASE_URL=https://qszgewvaplwgutjzlchb.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+```
+
+Use the publishable key only. Never add a `sb_secret_` or `service_role` key to Netlify frontend variables.
+
 ## Recommended production architecture
 
 Use **Supabase** rather than a self-managed free PostgreSQL host:
