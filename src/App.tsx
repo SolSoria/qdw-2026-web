@@ -42,17 +42,52 @@ function HomePage({ content }: { content: ContentItem[] }) {
 }
 
 function AdminPage({ content, setContent }: { content: ContentItem[]; setContent: (items: ContentItem[]) => void }) {
+  const [session, setSession] = useState<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>(null)
+  const [authLoading, setAuthLoading] = useState(Boolean(supabase))
+  const [authError, setAuthError] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<ContentItem | null>(null)
   const [filter, setFilter] = useState<ContentItem['type'] | 'all'>('all')
   const visible = useMemo(() => filter === 'all' ? content : content.filter((item) => item.type === filter), [content, filter])
-  const save = (item: ContentItem) => { const next = content.some((current) => current.id === item.id) ? content.map((current) => current.id === item.id ? item : current) : [...content, { ...item, id: crypto.randomUUID() }]; setContent(next); setEditing(null) }
-  const remove = (id: string) => setContent(content.filter((item) => item.id !== id))
-  return <div className="admin-shell"><header className="admin-header"><div><p className="eyebrow">QDW26 · Content Studio</p><h1>Admin panel</h1></div><Link to="/">Ver sitio ↗</Link></header><main className="admin-main"><div className="toolbar"><div className="filters">{(['all', 'program', 'speaker', 'workshop'] as const).map((value) => <button className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} key={value}>{value === 'all' ? 'Todo' : value}</button>)}</div><button className="button button-dark" onClick={() => setEditing({ id: '', type: 'program', title: '', description: '' })}>+ Nuevo contenido</button></div><div className="admin-table">{visible.map((item) => <article key={item.id}><div><span className="tag">{item.type}</span><h2>{item.title || 'Sin título'}</h2><p>{item.description}</p></div><div className="row-actions"><button onClick={() => setEditing(item)}>Editar</button><button className="danger" onClick={() => remove(item.id)}>Eliminar</button></div></article>)}</div></main>{editing && <ContentEditor item={editing} onSave={save} onClose={() => setEditing(null)} />}</div>
+  useEffect(() => {
+    if (!supabase) { setAuthLoading(false); return }
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthLoading(false) })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => listener.subscription.unsubscribe()
+  }, [])
+  const signIn = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!supabase) return
+    setAuthError('')
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) { setAuthError(error.message); return }
+    setSession(data.session)
+  }
+  const signOut = () => { if (supabase) void supabase.auth.signOut() }
+  if (authLoading) return <div className="admin-shell"><p className="admin-loading">Cargando sesión…</p></div>
+  if (supabase && !session) return <div className="admin-shell"><form className="login-card" onSubmit={signIn}><p className="eyebrow">QDW26 · Content Studio</p><h1>Acceso admin</h1><label>Correo<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>{authError && <p className="auth-error">{authError}</p>}<button className="button button-dark">Entrar</button><Link to="/">Volver al sitio</Link></form></div>
+  const save = async (item: ContentItem) => {
+    setSaving(true)
+    const record = { type: item.type, title: item.title, description: item.description, image_path: item.image ?? null, sort_order: content.find((current) => current.id === item.id)?.id ? content.findIndex((current) => current.id === item.id) + 1 : content.length + 1 }
+    if (supabase) {
+      const result = item.id ? await supabase.from('content_items').update(record).eq('id', item.id) : await supabase.from('content_items').insert(record)
+      if (result.error) { setAuthError(result.error.message); setSaving(false); return }
+    }
+    const next = content.some((current) => current.id === item.id) ? content.map((current) => current.id === item.id ? item : current) : [...content, { ...item, id: crypto.randomUUID() }]
+    setContent(next); setEditing(null); setSaving(false)
+  }
+  const remove = async (id: string) => {
+    if (supabase) { const { error } = await supabase.from('content_items').delete().eq('id', id); if (error) { setAuthError(error.message); return } }
+    setContent(content.filter((item) => item.id !== id))
+  }
+  return <div className="admin-shell"><header className="admin-header"><div><p className="eyebrow">QDW26 · Content Studio</p><h1>Admin panel</h1></div><div className="admin-nav"><Link to="/">Ver sitio ↗</Link>{supabase && <button onClick={signOut}>Cerrar sesión</button>}</div></header><main className="admin-main"><div className="toolbar"><div className="filters">{(['all', 'program', 'speaker', 'workshop'] as const).map((value) => <button className={filter === value ? 'active' : ''} onClick={() => setFilter(value)} key={value}>{value === 'all' ? 'Todo' : value}</button>)}</div><button className="button button-dark" onClick={() => setEditing({ id: '', type: 'program', title: '', description: '' })}>+ Nuevo contenido</button></div>{authError && <p className="auth-error">{authError}</p>}<div className="admin-table">{visible.map((item) => <article key={item.id}><div><span className="tag">{item.type}</span><h2>{item.title || 'Sin título'}</h2><p>{item.description}</p></div><div className="row-actions"><button onClick={() => setEditing(item)}>Editar</button><button className="danger" onClick={() => remove(item.id)}>Eliminar</button></div></article>)}</div></main>{editing && <ContentEditor item={editing} saving={saving} onSave={save} onClose={() => setEditing(null)} />}</div>
 }
 
-function ContentEditor({ item, onSave, onClose }: { item: ContentItem; onSave: (item: ContentItem) => void; onClose: () => void }) {
+function ContentEditor({ item, saving, onSave, onClose }: { item: ContentItem; saving: boolean; onSave: (item: ContentItem) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(item)
-  return <div className="modal-backdrop"><form className="editor" onSubmit={(event) => { event.preventDefault(); onSave(draft) }}><div className="editor-head"><h2>{item.id ? 'Editar contenido' : 'Nuevo contenido'}</h2><button type="button" onClick={onClose}>×</button></div><label>Tipo<select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as ContentItem['type'] })}><option value="program">Programa</option><option value="speaker">Speaker</option><option value="workshop">Taller</option></select></label><label>Título<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required /></label><label>Descripción<textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} rows={5} required /></label><label>Imagen URL<input value={draft.image ?? ''} onChange={(event) => setDraft({ ...draft, image: event.target.value })} placeholder="/assets/img/..." /></label><button className="button button-dark">Guardar cambios</button></form></div>
+  return <div className="modal-backdrop"><form className="editor" onSubmit={(event) => { event.preventDefault(); onSave(draft) }}><div className="editor-head"><h2>{item.id ? 'Editar contenido' : 'Nuevo contenido'}</h2><button type="button" onClick={onClose}>×</button></div><label>Tipo<select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as ContentItem['type'] })}><option value="program">Programa</option><option value="speaker">Speaker</option><option value="workshop">Taller</option></select></label><label>Título<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} required /></label><label>Descripción<textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} rows={5} required /></label><label>Imagen URL<input value={draft.image ?? ''} onChange={(event) => setDraft({ ...draft, image: event.target.value })} placeholder="/assets/img/..." /></label><button className="button button-dark" disabled={saving}>{saving ? 'Guardando…' : 'Guardar cambios'}</button></form></div>
 }
 
 export default function App() {

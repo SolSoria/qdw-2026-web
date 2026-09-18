@@ -17,6 +17,8 @@ drop policy if exists "Admins manage content" on public.content_items;
 create policy "Published content is public" on public.content_items for select using (published = true);
 create policy "Admins manage content" on public.content_items for all using (
   exists (select 1 from public.admin_users where user_id = auth.uid())
+) with check (
+  exists (select 1 from public.admin_users where user_id = auth.uid())
 );
 
 insert into storage.buckets (id, name, public) values ('site-media', 'site-media', true)
